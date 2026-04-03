@@ -1,0 +1,7 @@
+@GeniusAgent.Worker_HostAddress = https://localhost:7169
+
+### Generate code artifacts from a prompt
+POST {{GeniusAgent.Worker_HostAddress}}/generate?prompt=Create%20a%20simple%20calculator%20service
+Accept: application/json
+
+###

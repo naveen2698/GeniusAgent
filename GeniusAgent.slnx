@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/scripts/" />
+  <Folder Name="/Solution Items/">
+    <File Path="docker-compose.yml" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="GeniusAgent.Application/GeniusAgent.Application.csproj" />
+    <Project Path="GeniusAgent.Core/GeniusAgent.Core.csproj" />
+    <Project Path="GeniusAgent.Infrastructure/GeniusAgent.Infrastructure.csproj" />
+    <Project Path="GeniusAgent.Worker/GeniusAgent.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+</Solution>
