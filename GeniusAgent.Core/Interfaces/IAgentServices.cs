@@ -5,11 +5,11 @@ namespace GeniusAgent.Core.Interfaces;
 public interface ILLMService
 {
     Task<string> GenerateArtifactsAsync(string prompt, string context);
-    IAsyncEnumerable<string> GenerateArtifactsStreamAsync(string prompt, string context); // New
     Task<string> RefineCodeAsync(string originalCode, string errorLog);
+    Task<string> AlignTerminologyAsync(string goal, string context);
 }
 
-public interface IRepositoryAnalyzer
+public interface IKnowledgeSource
 {
     Task<string> GetRelevantPatternsAsync(string userIntent);
 }

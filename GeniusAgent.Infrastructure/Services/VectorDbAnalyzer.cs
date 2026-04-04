@@ -3,35 +3,21 @@ using Microsoft.Extensions.Configuration;
 using OpenAI;
 using OpenAI.Embeddings;
 using Qdrant.Client;
-using System.ClientModel;
 using System.Text;
 
 namespace GeniusAgent.Infrastructure.Services;
 
-public class VectorDbAnalyzer : IRepositoryAnalyzer
+public class VectorDbAnalyzer : IKnowledgeSource
 {
     private readonly QdrantClient _qdrantClient;
     private readonly EmbeddingClient _embeddingClient;
     private readonly string _collectionName;
 
-    public VectorDbAnalyzer(IConfiguration config)
+    public VectorDbAnalyzer(OpenAIClient client, IConfiguration config)
     {
         _collectionName = config["VectorDb:CollectionName"] ?? "genius-agent-local-nomic";
-
-        // Local Ollama model (nomic-embed-text is highly recommended for RAG)
         var embeddingModel = config["OpenAi:EmbeddingModel"] ?? "nomic-embed-text";
-
-        // 1. Configure the OpenAI SDK to talk to local Ollama
-        var options = new OpenAIClientOptions
-        {
-            Endpoint = new Uri(config["OpenAi:Endpoint"] ?? "http://localhost:11434/v1")
-        };
-
-        // Key is required by SDK but ignored by Ollama
-        var client = new OpenAIClient(new ApiKeyCredential("ollama"), options);
         _embeddingClient = client.GetEmbeddingClient(embeddingModel);
-
-        // 2. Configure Qdrant Client
         _qdrantClient = new QdrantClient(new Uri(config["VectorDb:Endpoint"] ?? "http://localhost:6334"));
     }
 

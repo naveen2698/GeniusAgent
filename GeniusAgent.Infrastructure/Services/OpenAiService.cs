@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Configuration;
 using OpenAI;
 using OpenAI.Chat;
-using System.ClientModel;
 
 namespace GeniusAgent.Infrastructure.Services;
 
@@ -10,19 +9,9 @@ public class OpenAiService : ILLMService
 {
     private readonly ChatClient _chatClient;
 
-    public OpenAiService(IConfiguration config)
+    public OpenAiService(OpenAIClient client, IConfiguration config)
     {
-        var model = config["OpenAi:Model"] ?? "codellama";
-
-        // Point the client to your local Ollama endpoint
-        var options = new OpenAIClientOptions
-        {
-            Endpoint = new Uri(config["OpenAi:Endpoint"] ?? "http://localhost:11434/v1")
-        };
-
-        // Ollama doesn't validate the key, but the SDK needs a placeholder
-        var client = new OpenAIClient(new ApiKeyCredential("ollama"), options);
-        _chatClient = client.GetChatClient(model);
+        _chatClient = client.GetChatClient(config["OpenAi:Model"] ?? "codellama");
     }
 
     public async Task<string> GenerateArtifactsAsync(string prompt, string context)
@@ -34,13 +23,33 @@ public class OpenAiService : ILLMService
             new UserChatMessage($"Requirement: {prompt}")
         };
 
-        var options = new ChatCompletionOptions
+        return await GetCompletionAsync(messages, new ChatCompletionOptions
         {
-            Temperature = 0.2f // Low temperature for consistent code structure
+            Temperature = 0.2f
+        });
+    }
+
+    public async Task<string> AlignTerminologyAsync(string goal, string context)
+    {
+        var systemPrompt = @"You are an Enterprise Semantic Normalizer. 
+        Your task is to:
+        1. Analyze the user goal and the retrieved system knowledge (code, docs, catalogs).
+        2. Identify inconsistent terminology (e.g., 'Client' vs 'Customer', 'ID' vs 'UUID').
+        3. Normalize all terms to the authoritative enterprise standards found in the context.
+        4. Resolve contradictions between old documentation and current code.
+        5. Output a 'Normalized Requirement Specification' that is structured and reviewable.";
+
+        var messages = new ChatMessage[]
+        {
+            new SystemChatMessage(systemPrompt),
+            new UserChatMessage($"Authoritative Context:\n{context}"),
+            new UserChatMessage($"User Goal to Normalize: {goal}")
         };
 
-        var response = await _chatClient.CompleteChatAsync(messages, options);
-        return response.Value.Content[0].Text;
+        return await GetCompletionAsync(messages, new ChatCompletionOptions
+        {
+            Temperature = 0.1f
+        });
     }
 
     public async Task<string> RefineCodeAsync(string originalCode, string errorLog)
@@ -53,39 +62,23 @@ public class OpenAiService : ILLMService
             new UserChatMessage("Please provide the corrected code using the same '// File: Path' format.")
         };
 
-        var response = await _chatClient.CompleteChatAsync(messages);
+        return await GetCompletionAsync(messages);
+    }
+
+    private async Task<string> GetCompletionAsync(ChatMessage[] messages, ChatCompletionOptions? options = null)
+    {
+        var response = await _chatClient.CompleteChatAsync(messages, options);
         return response.Value.Content[0].Text;
     }
 
-    public async IAsyncEnumerable<string> GenerateArtifactsStreamAsync(string prompt, string context)
-    {
-        var messages = new ChatMessage[]
-        {
-            new SystemChatMessage(GetMasterSystemPrompt()),
-            new UserChatMessage($"Context:\n{context}"),
-            new UserChatMessage($"Task: {prompt}")
-        };
-
-        await foreach (var update in _chatClient.CompleteChatStreamingAsync(messages))
-        {
-            foreach (var part in update.ContentUpdate)
-            {
-                if (!string.IsNullOrEmpty(part.Text))
-                {
-                    yield return part.Text;
-                }
-            }
-        }
-    }
-
-    private string GetMasterSystemPrompt()
+    private static string GetMasterSystemPrompt()
     {
         return @"Act as an Enterprise Architect. For every request:
         1. Generate the .NET code following Clean Architecture.
-        2. Every file MUST start with the header: // File: [RelativePath/FileName.cs]
+        2. Every file MUST include a header: // Source: [Document Name], Rule: [Rule ID]. If content is inferred, mark as // AI-INFERRED: [Reason].
         3. Use file-scoped namespaces.
         4. If a build error is provided, fix ONLY that specific error."";
         5. Link every class to a Requirement ID found in the context.
-        Output format: // File: [Path]";
+        Output format: // File: [Path].";
     }
 }
