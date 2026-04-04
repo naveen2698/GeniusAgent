@@ -80,12 +80,12 @@ public class OpenAiService : ILLMService
 
     private string GetMasterSystemPrompt()
     {
-        return @"### ROLE: Senior .NET Developer
-### TASK: Generate code artifacts based on the provided patterns.
-### RULES:
-1. ONLY output code. No conversational filler.
-2. Every file MUST start with the header: // File: [RelativePath/FileName.cs]
-3. Use file-scoped namespaces.
-4. If a build error is provided, fix ONLY that specific error.";
+        return @"Act as an Enterprise Architect. For every request:
+        1. Generate the .NET code following Clean Architecture.
+        2. Every file MUST start with the header: // File: [RelativePath/FileName.cs]
+        3. Use file-scoped namespaces.
+        4. If a build error is provided, fix ONLY that specific error."";
+        5. Link every class to a Requirement ID found in the context.
+        Output format: // File: [Path]";
     }
 }

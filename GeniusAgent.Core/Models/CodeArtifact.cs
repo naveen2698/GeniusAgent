@@ -33,7 +33,7 @@ public record CodeArtifact
 /// <summary>
 /// Represents the type of a code artifact.
 /// </summary>
-public enum ArtifactType { Undefined, DomainModel, Dto, Interface, Service, Repository, Controller, UnitTest }
+public enum ArtifactType { Undefined, DomainModel, Dto, Interface, Service, Repository, Controller, UnitTest, SystemDesign, BusinessRule, RequirementMap }
 
 /// <summary>
 /// Represents the result of a validation operation.

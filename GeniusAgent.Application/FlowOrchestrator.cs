@@ -44,6 +44,21 @@ public class FlowOrchestrator(ILLMService llm, IRepositoryAnalyzer analyzer, ICo
         await vcs.CreatePullRequestAsync($"ai/feat-{Guid.NewGuid().ToString()[..4]}", artifacts);
     }
 
+    private async Task<ValidationResult> ValidateEnterpriseCompliance(IEnumerable<CodeArtifact> artifacts)
+    {
+        var buildResult = await sandbox.RunBuildAndTestAsync(artifacts);
+        if (!buildResult.IsSuccess) return buildResult;
+
+        // Check for mandatory documentation
+        bool hasDesignDoc = artifacts.Any(a => a.Type == ArtifactType.SystemDesign);
+        if (!hasDesignDoc)
+        {
+            return new ValidationResult(false, new List<string> { "Compliance Error: No System Design/ADR artifact generated for this change." });
+        }
+
+        return new ValidationResult(true, new List<string>());
+    }
+
     private static List<CodeArtifact> ParseArtifacts(string input)
     {
         var artifacts = new List<CodeArtifact>();

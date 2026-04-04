@@ -9,5 +9,4 @@
     <Project Path="GeniusAgent.Infrastructure/GeniusAgent.Infrastructure.csproj" />
     <Project Path="GeniusAgent.Worker/GeniusAgent.Worker.csproj" />
   </Folder>
-  <Folder Name="/tests/" />
 </Solution>

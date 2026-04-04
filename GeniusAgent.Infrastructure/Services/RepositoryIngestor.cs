@@ -24,8 +24,8 @@ public class RepositoryIngestor(IConfiguration config, EmbeddingClient embedding
         }
 
         // 2. Scan for .cs files (excluding bin/obj/migrations)
-        var files = Directory.GetFiles(repoPath, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("obj") && !f.Contains("bin") && !f.Contains(".g.cs"));
+        var files = Directory.GetFiles(repoPath, "*.*", SearchOption.AllDirectories)
+     .Where(f => f.EndsWith(".cs") || f.EndsWith(".md") || f.EndsWith(".txt") || f.EndsWith(".pdf"));
 
         foreach (var filePath in files)
         {
