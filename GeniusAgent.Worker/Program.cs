@@ -1,5 +1,6 @@
 using GeniusAgent.Application;
 using GeniusAgent.Core.Interfaces;
+using GeniusAgent.Core.Models;
 using GeniusAgent.Infrastructure.Services;
 using OpenAI;
 using Scalar.AspNetCore;
@@ -9,6 +10,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 // OpenAPI
 builder.Services.AddOpenApi();
+
+// Compliance options
+var complianceOptions = new ComplianceOptions();
+builder.Configuration.GetSection("Compliance").Bind(complianceOptions);
+builder.Services.AddSingleton(complianceOptions);
 
 // Shared OpenAI client (Ollama-compatible)
 builder.Services.AddSingleton(sp =>
@@ -37,8 +43,17 @@ if (app.Environment.IsDevelopment())
 
 app.MapPost("/generate", async (string prompt, FlowOrchestrator orchestrator) =>
 {
-    await orchestrator.ExecuteWorkflowAsync(prompt);
-    return Results.Ok("Agent started processing...");
+    try
+    {
+        var result = await orchestrator.ExecuteWorkflowAsync(prompt);
+        return result.IsSuccess
+            ? Results.Ok(new { message = "Code generation completed. PR created." })
+            : Results.UnprocessableEntity(new { message = "Workflow failed compliance checks.", errors = result.Errors });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+    }
 })
 .WithName("GenerateCode")
 .WithDescription("Starts the AI code-generation workflow for the given prompt.");

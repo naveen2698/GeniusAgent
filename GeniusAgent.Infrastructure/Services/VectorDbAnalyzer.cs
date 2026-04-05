@@ -46,31 +46,38 @@ public class VectorDbAnalyzer : IKnowledgeSource
             return string.Empty;
         }
 
-        // Search Qdrant for matches
-        var searchResults = await _qdrantClient.SearchAsync(_collectionName, queryVector, limit: 5);
-
-        if (searchResults is null || searchResults.Count == 0)
+        try
         {
-            return string.Empty;
-        }
+            var searchResults = await _qdrantClient.SearchAsync(_collectionName, queryVector, limit: 5);
 
-        var contextBuilder = new StringBuilder();
-        contextBuilder.AppendLine("Existing repository patterns for consistency:");
-
-        foreach (var hit in searchResults)
-        {
-            if (hit.Payload is null
-                || !hit.Payload.TryGetValue("file_path", out var filePathValue)
-                || !hit.Payload.TryGetValue("content", out var contentValue))
+            if (searchResults is null || searchResults.Count == 0)
             {
-                continue;
+                return string.Empty;
             }
 
-            var path = filePathValue.StringValue;
-            var code = contentValue.StringValue;
-            contextBuilder.AppendLine($"--- File: {path} ---\n{code}\n");
-        }
+            var contextBuilder = new StringBuilder();
+            contextBuilder.AppendLine("Existing repository patterns for consistency:");
 
-        return contextBuilder.ToString();
+            foreach (var hit in searchResults)
+            {
+                if (hit.Payload is null
+                    || !hit.Payload.TryGetValue("file_path", out var filePathValue)
+                    || !hit.Payload.TryGetValue("content", out var contentValue))
+                {
+                    continue;
+                }
+
+                var path = filePathValue.StringValue;
+                var code = contentValue.StringValue;
+                contextBuilder.AppendLine($"--- File: {path} ---\n{code}\n");
+            }
+
+            return contextBuilder.ToString();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Vector search failed: {ex.Message}");
+            return string.Empty;
+        }
     }
 }

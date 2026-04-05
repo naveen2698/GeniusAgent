@@ -9,9 +9,12 @@ public class FlowOrchestrator(
     ILLMService llm,
     IKnowledgeSource knowledge,
     ICodeSandbox sandbox,
-    IVersionControl vcs)
+    IVersionControl vcs,
+    ComplianceOptions complianceOptions)
 {
-    public async Task ExecuteWorkflowAsync(string userGoal)
+    private static readonly string OutputDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), ".."));
+    private static readonly string SandboxDir = Path.Combine(OutputDir, "SandboxProject");
+    public async Task<ValidationResult> ExecuteWorkflowAsync(string userGoal)
     {
         // STAGE 1: EXTRACTION (Deterministic + Retrieval)
         var context = await ExtractContextAsync(userGoal);
@@ -20,7 +23,7 @@ public class FlowOrchestrator(
         var alignedRequirements = await NormalizeRequirementsAsync(userGoal, context);
 
         // STAGE 3: COMPOSITION (Generative)
-        var artifacts = await ComposeArtifactsAsync(alignedRequirements);
+        var artifacts = await ComposeArtifactsAsync(userGoal, alignedRequirements);
 
         // STAGE 4: VALIDATION (Deterministic Governance)
         var validation = await ValidateComplianceAsync(artifacts);
@@ -35,12 +38,16 @@ public class FlowOrchestrator(
             if (!validation.IsSuccess)
             {
                 Console.WriteLine("--- Governance Gate: Refined code failed compliance checks. ---");
-                return;
+                return validation;
             }
         }
 
+        // STAGE 5: WRITE ARTIFACTS TO SANDBOX
+        await WriteArtifactsToSandboxAsync(artifacts);
+
         // STAGE 6: DELIVERY
         await vcs.CreatePullRequestAsync(GenerateBranchName(userGoal), artifacts);
+        return new ValidationResult(true, []);
     }
 
     private Task<string> ExtractContextAsync(string goal) =>
@@ -49,37 +56,24 @@ public class FlowOrchestrator(
     private Task<string> NormalizeRequirementsAsync(string goal, string context) =>
         llm.AlignTerminologyAsync(goal, context);
 
-    private async Task<List<CodeArtifact>> ComposeArtifactsAsync(string requirements)
+    private async Task<List<CodeArtifact>> ComposeArtifactsAsync(string userGoal, string alignedContext)
     {
-        // The requirement is to produce 'structured, reviewable outputs'
-        // such as requirements documentation and technical design specifications.
+        var rawResponse = await llm.GenerateArtifactsAsync(userGoal, alignedContext);
+        await WriteDiagnosticFileAsync(OutputDir, "RawOutput.txt", rawResponse);
 
-        // 1. Generative Stage
-        // We call the LLM to generate the raw Markdown containing code and design docs.
-        var rawResponse = await llm.GenerateArtifactsAsync(requirements, string.Empty);
-
-        // 2. Deterministic Processing
-        // We use the static ParseArtifacts to turn raw text into typed objects.
-        // This maintains a clear system boundary between AI analysis and deterministic processing.
         var artifacts = ParseArtifacts(rawResponse);
 
-        // 3. Post-Processing for Traceability
-        // We ensure each artifact is tagged for human review.
+        Console.WriteLine($"[Composition] Parsed {artifacts.Count} artifact(s) from LLM output.");
         foreach (var artifact in artifacts)
-        {
-            Console.WriteLine($"[Composition] Generated {artifact.Type}: {artifact.FileName}");
-        }
+            Console.WriteLine($"[Composition]   {artifact.Type}: {artifact.FileName}");
 
         return artifacts;
     }
 
     private async Task<List<CodeArtifact>> RefineArtifactsAsync(List<CodeArtifact> originalArtifacts, List<string> errors)
     {
-        // 1. Prepare the Technical Context for the LLM
-        // We concatenate the errors into a structured log for the AI to analyze.
         string errorContext = string.Join(Environment.NewLine, errors);
 
-        // We convert the failed artifacts back into a readable format for the LLM.
         StringBuilder originalCodeBuilder = new();
         foreach (var artifact in originalArtifacts)
         {
@@ -87,75 +81,186 @@ public class FlowOrchestrator(
             originalCodeBuilder.AppendLine(artifact.Content);
         }
 
-        Console.WriteLine($"\n--- Technical Errors Detected. Initiating Self-Healing Stage ---");
-        Console.WriteLine($"Errors:\n{errorContext}");
+        Console.WriteLine($"\n--- Self-Healing: {errors.Count} error(s) detected ---");
 
-        // 2. Execute the Refinement Call
-        // This call uses the specialized RefineCodeAsync interface to fix the logic.
         var fixedRawResponse = await llm.RefineCodeAsync(originalCodeBuilder.ToString(), errorContext);
+        await WriteDiagnosticFileAsync(SandboxDir, "RawOutput_Refined.txt", fixedRawResponse);
 
-        // 3. Parse the Corrected Output
-        // We reuse the deterministic ParseArtifacts logic to ensure the new files are valid.
-        var refinedArtifacts = ParseArtifacts(fixedRawResponse);
-
-        return refinedArtifacts;
+        return ParseArtifacts(fixedRawResponse);
     }
 
     private static string GenerateBranchName(string description)
     {
-        // 1. Normalize the description (remove special characters and spaces)
-        // This ensures system boundaries and predictable branch naming
         string slug = Regex.Replace(description.ToLower(), @"[^a-z0-9\s-]", "");
         slug = Regex.Replace(slug, @"\s+", "-").Trim('-');
-
-        // 2. Truncate for safety and append a short timestamp for uniqueness within a day
-        // This supports the requirement for repeatable generation with predictable outcomes.
         string shortSlug = slug.Length > 30 ? slug[..30] : slug;
-        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmm");
-
-        return $"ai/feat-{shortSlug}-{timestamp}";
+        return $"ai/feat-{shortSlug}-{DateTime.UtcNow:yyyyMMdd-HHmm}";
     }
 
     private async Task<ValidationResult> ValidateComplianceAsync(IEnumerable<CodeArtifact> artifacts)
     {
-        // 1. Technical Validation (Existing Build Check)
-        var buildResult = await sandbox.RunBuildAndTestAsync(artifacts);
-        if (!buildResult.IsSuccess) return buildResult;
+        if (!complianceOptions.SkipSandboxValidation)
+        {
+            var buildResult = await sandbox.RunBuildAndTestAsync(artifacts);
+            if (!buildResult.IsSuccess) return buildResult;
+        }
 
-        // 2. Enterprise Governance Validation
         var complianceErrors = new List<string>();
 
-        bool hasDesignDoc = artifacts.Any(a => a.Type == ArtifactType.Service || a.FileName.EndsWith(".md"));
-        if (!hasDesignDoc)
-            complianceErrors.Add("Compliance Error: No corresponding design or traceability documentation found.");
-
-        foreach (var artifact in artifacts)
+        if (complianceOptions.EnforceDesignDocs)
         {
-            if (artifact.Type == ArtifactType.Service && !artifact.Content.Contains("// Source:"))
-                complianceErrors.Add($"Traceability Error: {artifact.FileName} is missing authoritative source citations.");
+            bool hasDesignDoc = artifacts.Any(a => a.Type == ArtifactType.SystemDesign);
+            if (!hasDesignDoc)
+                complianceErrors.Add("Compliance Error: No design documentation found.");
+        }
+
+        if (complianceOptions.EnforceSourceCitations)
+        {
+            foreach (var artifact in artifacts.Where(a => a.Type == ArtifactType.Service && !a.Content.Contains("// Source:")))
+                complianceErrors.Add($"Traceability Error: {artifact.FileName} is missing source citations.");
+        }
+
+        // Reject placeholder / stub code from lazy LLM output
+        string[] placeholderPatterns = ["Similar methods", "similar pattern", "left out", "follow a similar", "// ...", "// TODO"];
+        foreach (var artifact in artifacts.Where(a => a.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+        {
+            foreach (var pattern in placeholderPatterns)
+            {
+                if (artifact.Content.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                {
+                    complianceErrors.Add($"Completeness Error: {artifact.FileName} contains placeholder '{pattern}'.");
+                    break;
+                }
+            }
         }
 
         return complianceErrors.Count > 0
             ? new ValidationResult(false, complianceErrors)
-            : new ValidationResult(true, new List<string>());
+            : new ValidationResult(true, []);
     }
 
     private static List<CodeArtifact> ParseArtifacts(string input)
     {
         var artifacts = new List<CodeArtifact>();
-        var regex = new Regex(@"// File: (?<path>[\w\.\/-]+)\r?\n(?<code>[\s\S]*?)(?=// File:|$|```)", RegexOptions.Multiline);
-        foreach (Match match in regex.Matches(input))
+
+        // Primary format: // File: <path>
+        var sections = Regex.Split(input, @"(?=^//\s*File:\s*)", RegexOptions.Multiline);
+
+        foreach (var section in sections)
         {
-            var path = match.Groups["path"].Value.Trim();
+            var headerMatch = Regex.Match(section, @"^//\s*File:\s*(?<path>\S+)", RegexOptions.Multiline);
+            if (!headerMatch.Success) continue;
+
+            var path = headerMatch.Groups["path"].Value.Trim();
+
+            // Only accept .cs and .md files — skip .java or any other extensions
+            if (!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) &&
+                !path.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var code = section[headerMatch.Length..].Trim();
+
+            // Strip code-fence markers (```csharp, ```markdown, ```, etc.)
+            code = Regex.Replace(code, @"```\w*\r?\n?", "").Trim();
+
+            if (string.IsNullOrWhiteSpace(code)) continue;
+
             artifacts.Add(new CodeArtifact
             {
                 FileName = Path.GetFileName(path),
                 RelativePath = Path.GetDirectoryName(path) ?? "",
-                Content = match.Groups["code"].Value.Trim(),
-                Type = path.Contains("Service") ? ArtifactType.Service : ArtifactType.DomainModel
+                Content = CleanContent(code, path),
+                Type = ClassifyArtifact(path)
             });
         }
+
+        // Fallback format: bare filename followed by a code fence (e.g. "Design.md\n```markdown")
+        if (artifacts.Count == 0)
+        {
+            var fallbackPattern = new Regex(
+                @"^(?<path>[\w\.-]+\.(?:cs|md))\s*\n```\w*\s*\n(?<code>[\s\S]*?)\n```",
+                RegexOptions.Multiline);
+
+            foreach (Match match in fallbackPattern.Matches(input))
+            {
+                var path = match.Groups["path"].Value.Trim();
+                var code = match.Groups["code"].Value.Trim();
+                if (string.IsNullOrWhiteSpace(code)) continue;
+
+                artifacts.Add(new CodeArtifact
+                {
+                    FileName = Path.GetFileName(path),
+                    RelativePath = Path.GetDirectoryName(path) ?? "",
+                    Content = CleanContent(code, path),
+                    Type = ClassifyArtifact(path)
+                });
+            }
+        }
+
         return artifacts;
+    }
+
+    private static async Task WriteArtifactsToSandboxAsync(List<CodeArtifact> artifacts)
+    {
+        Directory.CreateDirectory(SandboxDir);
+
+        foreach (var pattern in new[] { "*.cs", "*.md" })
+        {
+            foreach (var existing in Directory.EnumerateFiles(SandboxDir, pattern, SearchOption.AllDirectories))
+            {
+                if (!existing.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+                    File.Delete(existing);
+            }
+        }
+
+        foreach (var artifact in artifacts)
+        {
+            var dir = Path.Combine(SandboxDir, artifact.RelativePath);
+            Directory.CreateDirectory(dir);
+            await File.WriteAllTextAsync(Path.Combine(dir, artifact.FileName), artifact.Content);
+            Console.WriteLine($"[Sandbox] Wrote {artifact.FileName}");
+        }
+
+        Console.WriteLine($"[Sandbox] {artifacts.Count} file(s) written to {SandboxDir}");
+    }
+
+    private static string CleanContent(string code, string path)
+    {
+        // Remove non-ASCII garbage tokens produced by small LLMs
+        code = Regex.Replace(code, @"[^\x00-\x7F]+", "");
+
+        // For .cs files, truncate everything after the last closing brace to remove trailing prose
+        if (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            int lastBrace = code.LastIndexOf('}');
+            if (lastBrace >= 0)
+                code = code[..(lastBrace + 1)];
+        }
+
+        return code.TrimEnd();
+    }
+
+    private static async Task WriteDiagnosticFileAsync(string directory, string fileName, string content)
+    {
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, fileName), content);
+    }
+
+    private static ArtifactType ClassifyArtifact(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        if (fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            return ArtifactType.SystemDesign;
+        if (fileName.Contains("Test", StringComparison.OrdinalIgnoreCase))
+            return ArtifactType.UnitTest;
+        if (fileName.Contains("Service", StringComparison.OrdinalIgnoreCase))
+            return ArtifactType.Service;
+        if (fileName.Contains("Interface", StringComparison.OrdinalIgnoreCase)
+            || (fileName.StartsWith('I') && fileName.Length > 1 && char.IsUpper(fileName[1])))
+            return ArtifactType.Interface;
+        if (fileName.Contains("Controller", StringComparison.OrdinalIgnoreCase))
+            return ArtifactType.Controller;
+        return ArtifactType.DomainModel;
     }
 }
 
