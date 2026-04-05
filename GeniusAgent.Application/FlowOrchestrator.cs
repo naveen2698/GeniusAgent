@@ -1,4 +1,4 @@
-﻿using GeniusAgent.Core.Interfaces;
+using GeniusAgent.Core.Interfaces;
 using GeniusAgent.Core.Models;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -88,6 +88,7 @@ public class FlowOrchestrator(
         }
 
         Console.WriteLine($"\n--- Technical Errors Detected. Initiating Self-Healing Stage ---");
+        Console.WriteLine($"Errors:\n{errorContext}");
 
         // 2. Execute the Refinement Call
         // This call uses the specialized RefineCodeAsync interface to fix the logic.

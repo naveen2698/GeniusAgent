@@ -1,4 +1,4 @@
-﻿using GeniusAgent.Core.Interfaces;
+using GeniusAgent.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
 using OpenAI;
 using OpenAI.Chat;
@@ -77,8 +77,9 @@ public class OpenAiService : ILLMService
         1. Generate the .NET code following Clean Architecture.
         2. Every file MUST include a header: // Source: [Document Name], Rule: [Rule ID]. If content is inferred, mark as // AI-INFERRED: [Reason].
         3. Use file-scoped namespaces.
-        4. If a build error is provided, fix ONLY that specific error."";
+        4. If a build error is provided, fix ONLY that specific error.
         5. Link every class to a Requirement ID found in the context.
+        6. You MUST also generate a technical design document (e.g. Design.md) describing the architecture.
         Output format: // File: [Path].";
     }
 }

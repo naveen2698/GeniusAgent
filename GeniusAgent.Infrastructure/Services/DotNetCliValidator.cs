@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using GeniusAgent.Core.Interfaces;
 using GeniusAgent.Core.Models;
 
@@ -13,6 +13,15 @@ public class DotNetCliValidator : ICodeSandbox
 
         try
         {
+            var csprojContent = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>";
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "Sandbox.csproj"), csprojContent);
+
             foreach (var file in artifacts)
             {
                 var path = Path.Combine(tempDir, file.RelativePath);

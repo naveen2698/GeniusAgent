@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Note: After spinning this up, you need to exec into the container and run:
+    # ollama run deepseek-coder:6.7b
+    # ollama pull nomic-embed-text
+
+volumes:
+  qdrant_data:
+  ollama_data:
